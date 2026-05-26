@@ -1,4 +1,6 @@
-# 用户脚本
+# 智谱 GLM Coding Plan 抢购助手用户脚本
+
+这是智谱 GLM Coding Plan 抢购助手的油猴 / Tampermonkey 用户脚本，配合本地 CPU/GPU OCR 后端自动识别中文点选验证码并点击。
 
 安装方式：
 

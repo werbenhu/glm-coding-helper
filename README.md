@@ -1,8 +1,12 @@
-# 智谱 GLM Coding Plan 助手 + 本地自动验证码
+# 智谱 GLM Coding Plan 抢购助手 + 本地 OCR 自动验证码
 
-油猴脚本 + 本地 CPU/GPU OCR 后端，用于 GLM Coding Plan 页面流程辅助和中文点选验证码自动识别。
+智谱 GLM Coding Plan 抢购助手，油猴脚本 / Tampermonkey 脚本 + 本地 CPU/GPU OCR 后端，用于 GLM Coding Plan 限时抢购、中文点选验证码自动识别、验证码自动点击、套餐按钮提前可点、限流重试和多窗口抢购辅助。
+
+如果你在搜索“智谱 GLM Coding Plan 抢购”“GLM Coding 抢购助手”“GLM Coding Plan 油猴脚本”“GLM Coding Plan 自动验证码”“GLM Coding Plan OCR”“智谱编程套餐抢购”，这个项目就是完整的一套前端油猴脚本 + 本地识别后端。
 
 默认使用作者内置折扣入口，可获得 95 折优惠；介意者可在脚本中自行替换入口参数。
+
+关键词：智谱、智谱清言、GLM Coding、GLM Coding Plan、GLM Coding Plan 抢购、智谱 GLM Coding 抢购、油猴脚本、Tampermonkey、本地 OCR、自动验证码、中文点选验证码、验证码自动点击、CPU OCR、GPU OCR、抢购助手、订阅助手。
 
 ## 演示
 
@@ -10,10 +14,10 @@ https://github.com/user-attachments/assets/e1a56d07-5c4d-4aa1-a567-909dd25bd037
 
 ## 能做什么
 
-- 自动跳回限流页，减少手动刷新和返回操作
+- GLM Coding Plan 抢购流程辅助，减少手动刷新和返回操作
 - 提前解除页面按钮不可点击状态，让订阅按钮可以操作
 - 自动切换套餐和订阅周期，按配置顺序尝试
-- 遇到中文点选验证码时，调用本地 OCR 后端自动识别并点击
+- 遇到中文点选验证码时，调用本地 OCR 后端自动识别并点击目标文字
 - 支持 CPU/GPU 本地识别，不上传验证码图片到第三方服务
 - 支持一键多开窗口，方便补货前预热和同时监控
 - 默认不自动关闭无效支付链接/限流弹窗，需要在配置面板里手动开启
