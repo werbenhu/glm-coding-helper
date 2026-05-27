@@ -1,0 +1,109 @@
+param(
+    [string]$OutputDir = "dist",
+    [switch]$SkipPortableCpu
+)
+
+$ErrorActionPreference = "Stop"
+$Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+Set-Location $Root
+
+$OutRoot = Join-Path $Root $OutputDir
+New-Item -ItemType Directory -Path $OutRoot -Force | Out-Null
+$Stamp = Get-Date -Format "yyyyMMdd_HHmmss"
+
+function Copy-PackageItems {
+    param(
+        [string]$PackageDir,
+        [string[]]$Items
+    )
+    New-Item -ItemType Directory -Path $PackageDir -Force | Out-Null
+    foreach ($item in $Items) {
+        $src = Join-Path $Root $item
+        if (-not (Test-Path $src)) { continue }
+        $dst = Join-Path $PackageDir $item
+        Write-Host "Copying $item"
+        if ((Get-Item $src).PSIsContainer) {
+            robocopy $src $dst /E /XD __pycache__ /XF *.pyc *.pyo /NFL /NDL /NJH /NJS /NP | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw "robocopy failed for $item with exit code $LASTEXITCODE" }
+        } else {
+            $dstParent = Split-Path -Parent $dst
+            if ($dstParent) { New-Item -ItemType Directory -Path $dstParent -Force | Out-Null }
+            Copy-Item -LiteralPath $src -Destination $dst -Force
+        }
+    }
+    New-Item -ItemType Directory -Path (Join-Path $PackageDir "dataset") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $PackageDir "logs") -Force | Out-Null
+}
+
+function New-Zip {
+    param(
+        [string]$PackageDir,
+        [string]$ZipPath
+    )
+    if (Test-Path $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
+    $sevenZip = Get-Command 7z -ErrorAction SilentlyContinue
+    $sevenZipA = Get-Command 7za -ErrorAction SilentlyContinue
+    if ($sevenZip) {
+        & $sevenZip.Source a -tzip $ZipPath $PackageDir | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "7z failed with exit code $LASTEXITCODE" }
+    } elseif ($sevenZipA) {
+        & $sevenZipA.Source a -tzip $ZipPath $PackageDir | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "7za failed with exit code $LASTEXITCODE" }
+    } else {
+        $parent = Split-Path -Parent $PackageDir
+        $leaf = Split-Path -Leaf $PackageDir
+        Push-Location $parent
+        try {
+            tar -a -cf (Split-Path -Leaf $ZipPath) $leaf
+            if ($LASTEXITCODE -ne 0) { throw "tar zip failed with exit code $LASTEXITCODE" }
+        } finally {
+            Pop-Location
+        }
+    }
+    $zipSize = (Get-Item $ZipPath).Length
+    Write-Host ("Created {0} ({1:N1} MB)" -f $ZipPath, ($zipSize / 1MB))
+}
+
+$OnlineName = "glm-coding-helper-online-installer-$Stamp"
+$OnlineDir = Join-Path $OutRoot $OnlineName
+if (Test-Path $OnlineDir) { Remove-Item -LiteralPath $OnlineDir -Recurse -Force }
+
+$CommonItems = @(
+    "glm-coding-helper.user.js",
+    "scripts\userscripts\glm-coding-captcha-direct.user.js",
+    "start-backend.cmd",
+    "install-env.cmd",
+    "one-click-start.cmd",
+    "启动后端.cmd",
+    "首次安装环境.cmd",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "requirements-backend-cpu.txt",
+    "requirements-backend-gpu.txt",
+    "scripts",
+    "models"
+)
+
+Write-Host "Building online installer package..."
+Copy-PackageItems -PackageDir $OnlineDir -Items $CommonItems
+Remove-Item -LiteralPath (Join-Path $OnlineDir "scripts\__pycache__") -Recurse -Force -ErrorAction SilentlyContinue
+$OnlineGuide = @"
+GLM Coding Helper online installer package
+
+Recommended:
+1. Install or update Tampermonkey script from glm-coding-helper.user.js.
+2. Double-click one-click-start.cmd.
+3. It will install CPU/GPU backend dependencies automatically when missing, then start the backend.
+
+Manual:
+- install-env.cmd installs CPU backend environment.
+- start-backend.cmd starts CPU backend after environment exists.
+"@
+Set-Content -LiteralPath (Join-Path $OnlineDir "ONLINE_INSTALLER_README.txt") -Value $OnlineGuide -Encoding UTF8
+New-Zip -PackageDir $OnlineDir -ZipPath (Join-Path $OutRoot "$OnlineName.zip")
+
+if (-not $SkipPortableCpu) {
+    Write-Host "Building portable CPU package..."
+    & powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\release\build_portable.ps1" -OutputDir $OutputDir
+}

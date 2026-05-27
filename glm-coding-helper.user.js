@@ -1,12 +1,14 @@
 // ==UserScript==
 // @name         智谱 GLM Coding Plan 抢购助手 + 本地 OCR 自动验证码
 // @namespace    http://tampermonkey.net/
-// @version      8.8
+// @version      8.12
 // @description  GLM Coding Rush / 智谱 GLM Coding Plan 抢购助手，一键抢购油猴脚本 / Tampermonkey userscript，配合本地 CPU/GPU OCR 自动识别中文点选验证码并点击，支持多窗口并发、限流重试和支付页安全保护
 // @author       mumumi
 // @include      https://*bigmodel.cn/glm-coding*
 // @match        https://bigmodel.cn/glm-coding*
 // @match        https://www.bigmodel.cn/glm-coding*
+// @match        https://*.gtimg.com/*
+// @match        https://*.captcha.qcloud.com/*
 // @include      https://*bigmodel.cn/html/rate-limit.html*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=bigmodel.cn
 // @grant        GM_setValue
@@ -14,6 +16,13 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_openInTab
 // @grant        GM_xmlhttpRequest
+// @connect      localhost:8888
+// @connect      127.0.0.1:8888
+// @connect      gtimg.com
+// @connect      *.gtimg.com
+// @connect      captcha.qcloud.com
+// @connect      *.captcha.qcloud.com
+// @connect      turing.captcha.qcloud.com
 // @run-at       document-start
 // @license      GNU GPLv3
 // @source       https://greasyfork.org/zh-CN/scripts/572157-glm-coding-plan%E6%8A%A2%E8%B4%AD%E5%8A%A9%E6%89%8B
@@ -22,6 +31,236 @@
  
 (function () {
     'use strict';
+
+    const __glmHost = (() => { try { return location.hostname || ''; } catch { return ''; } })();
+    const __inTencentCaptchaFrame = __glmHost.includes('gtimg.com') || __glmHost.includes('captcha.qcloud.com');
+    if (__inTencentCaptchaFrame) {
+        initTencentCaptchaDirectBridge();
+        return;
+    }
+
+    function initTencentCaptchaDirectBridge() {
+        const DIRECT_OCR_URL = 'http://127.0.0.1:8888/captcha_direct';
+        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+        let solving = false;
+        let lastBgUrl = '';
+        const captchaCfg = (() => {
+            try {
+                const raw = GM_getValue('glm_coding_config_v5', '{}');
+                return { AUTO_CAPTCHA_CLICK: true, AUTO_CAPTCHA_CONFIRM: false, ...JSON.parse(raw || '{}') };
+            } catch {
+                return { AUTO_CAPTCHA_CLICK: true, AUTO_CAPTCHA_CONFIRM: false };
+            }
+        })();
+
+        function log(msg) {
+            console.log('[glm-captcha-direct] ' + msg);
+        }
+
+        function visible(el) {
+            if (!el) return false;
+            const style = getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden') return false;
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+        }
+
+        function bgUrlFrom(el) {
+            if (!el) return '';
+            const text = (el.style && el.style.backgroundImage ? el.style.backgroundImage : '') || getComputedStyle(el).backgroundImage || '';
+            const match = text.match(/url\(["']?([^"')]+)["']?\)/);
+            if (!match) return '';
+            try { return new URL(match[1], location.href).href; }
+            catch { return match[1]; }
+        }
+
+        function findBgElement() {
+            const selectors = [
+                '#slideBg',
+                '.tencent-captcha-dy__verify-bg-img',
+                '[class*="verify-bg"]',
+                '.tencent-captcha-dy__bg-img',
+                '.tencent-captcha-dy__image-area',
+            ];
+            for (const selector of selectors) {
+                const el = document.querySelector(selector);
+                if (visible(el) && bgUrlFrom(el)) return el;
+            }
+            return null;
+        }
+
+        function findPromptText() {
+            const selectors = [
+                '#instructionText',
+                '.tencent-captcha-dy__header-text',
+                '.tencent-captcha-dy__header-title-wrap .tencent-captcha-dy__header-text',
+                '[class*="header-text"]',
+            ];
+            for (const selector of selectors) {
+                const el = document.querySelector(selector);
+                if (!visible(el)) continue;
+                const raw = (el.textContent || el.getAttribute('aria-label') || '').trim();
+                const cleaned = raw
+                    .replace(/^\s*\u8BF7\u4F9D\u6B21\u70B9\u51FB[:\uff1a]?\s*/, '')
+                    .replace(/\s+/g, '');
+                const chars = (cleaned.match(/[\u4e00-\u9fff]/g) || []).slice(-3);
+                if (chars.length >= 3) return chars.join('');
+            }
+            return '';
+        }
+
+        function fetchImageDataUrl(url) {
+            return new Promise((resolve, reject) => {
+                if (typeof GM_xmlhttpRequest !== 'undefined') {
+                    GM_xmlhttpRequest({
+                        method: 'GET',
+                        url,
+                        responseType: 'blob',
+                        onload: (res) => {
+                            const reader = new FileReader();
+                            reader.onload = () => resolve(reader.result);
+                            reader.onerror = () => reject(new Error('FileReader failed'));
+                            reader.readAsDataURL(res.response);
+                        },
+                        onerror: () => reject(new Error('image download failed')),
+                    });
+                    return;
+                }
+                fetch(url, { credentials: 'include' })
+                    .then(r => r.blob())
+                    .then(blob => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(reader.result);
+                        reader.onerror = () => reject(new Error('FileReader failed'));
+                        reader.readAsDataURL(blob);
+                    })
+                    .catch(reject);
+            });
+        }
+
+        function postDirect(dataUrl, chars) {
+            const body = JSON.stringify({
+                image: dataUrl,
+                text: chars,
+                ts: Date.now(),
+                source: 'tencent_iframe_direct',
+            });
+            return new Promise((resolve, reject) => {
+                if (typeof GM_xmlhttpRequest !== 'undefined') {
+                    GM_xmlhttpRequest({
+                        method: 'POST',
+                        url: DIRECT_OCR_URL,
+                        headers: { 'Content-Type': 'application/json' },
+                        data: body,
+                        onload: (res) => {
+                            try { resolve(JSON.parse(res.responseText)); }
+                            catch { reject(new Error('bad direct OCR JSON')); }
+                        },
+                        onerror: () => reject(new Error('direct OCR request failed')),
+                    });
+                    return;
+                }
+                fetch(DIRECT_OCR_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body,
+                }).then(r => r.json()).then(resolve).catch(reject);
+            });
+        }
+
+        function dispatchClick(el, nx, ny, label) {
+            const rect = el.getBoundingClientRect();
+            const win = el.ownerDocument.defaultView || window;
+            const clientX = rect.left + nx * rect.width;
+            const clientY = rect.top + ny * rect.height;
+            const base = { bubbles: true, cancelable: true, view: win, clientX, clientY, button: 0, buttons: 1 };
+            const pointer = { ...base, pointerId: 1, pointerType: 'mouse', isPrimary: true, pressure: 0.5 };
+            try { if (win.PointerEvent) el.dispatchEvent(new win.PointerEvent('pointerdown', pointer)); } catch {}
+            el.dispatchEvent(new win.MouseEvent('mousedown', base));
+            try { if (win.PointerEvent) el.dispatchEvent(new win.PointerEvent('pointerup', pointer)); } catch {}
+            el.dispatchEvent(new win.MouseEvent('mouseup', base));
+            el.dispatchEvent(new win.MouseEvent('click', base));
+            log('clicked ' + (label || '') + ' @ ' + nx.toFixed(3) + ',' + ny.toFixed(3));
+        }
+
+        function clickConfirm() {
+            const selectors = [
+                '.verify-btn',
+                '.tencent-captcha-dy__verify-confirm-btn',
+                '.tencent-captcha-dy__btn-confirm',
+                '.tencent-captcha-dy__footer .btn',
+            ];
+            for (const selector of selectors) {
+                const btn = document.querySelector(selector);
+                if (visible(btn)) {
+                    btn.click();
+                    log('confirm clicked: ' + selector);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function hasError() {
+            const note = document.querySelector('#tcaptcha_note, .tencent-captcha-dy__verify-error-text');
+            return visible(note);
+        }
+
+        async function solveOnce() {
+            if (!captchaCfg.AUTO_CAPTCHA_CLICK) return;
+            const bgEl = findBgElement();
+            if (!bgEl) return;
+            const bgUrl = bgUrlFrom(bgEl);
+            if (!bgUrl || bgUrl === lastBgUrl) return;
+            const chars = findPromptText();
+            if (chars.length < 3) return;
+            if (hasError()) {
+                const reload = document.querySelector('#reload, .tencent-captcha-dy__footer-icon--refresh img');
+                if (reload) reload.click();
+                lastBgUrl = '';
+                return;
+            }
+
+            lastBgUrl = bgUrl;
+            log('capture ' + chars + ' from ' + bgUrl.slice(0, 90));
+            const dataUrl = await fetchImageDataUrl(bgUrl);
+            const response = await postDirect(dataUrl, chars);
+            const result = response && response.result;
+            if (!result || !result.success || !Array.isArray(result.click_coords)) {
+                log('direct OCR failed: ' + JSON.stringify(response).slice(0, 200));
+                return;
+            }
+
+            for (const point of result.click_coords) {
+                const nx = Number(point.nx);
+                const ny = Number(point.ny);
+                if (!Number.isFinite(nx) || !Number.isFinite(ny)) continue;
+                dispatchClick(bgEl, nx, ny, point.char || '');
+                await sleep(180);
+            }
+            await sleep(250);
+            if (captchaCfg.AUTO_CAPTCHA_CONFIRM) clickConfirm();
+        }
+
+        async function tick() {
+            if (solving) return;
+            solving = true;
+            try { await solveOnce(); }
+            catch (e) {
+                log('error: ' + e.message);
+                lastBgUrl = '';
+            } finally {
+                solving = false;
+            }
+        }
+
+        log('started on ' + location.hostname);
+        const observer = new MutationObserver(() => setTimeout(tick, 80));
+        const root = document.body || document.documentElement;
+        observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+        setTimeout(tick, 500);
+        setInterval(tick, 1200);
+    }
  
     // ── 去重保护：防止篡猴里装了改名导致的两个实例同时运行 ──────────────────
     if (document.documentElement.dataset.glmHelper === '1') { return; }
@@ -256,6 +495,8 @@
         SMART_REFRESH     : true,
         AUTO_CLOSE_INVALID: false,
         AUTO_CLICK_SUB    : true,
+        AUTO_CAPTCHA_CLICK : true,
+        AUTO_CAPTCHA_CONFIRM: false,
     };
  
     function loadCfg() { try { const s = GM_getValue(STORAGE_KEY, null); return s ? { ...DEF, ...JSON.parse(s) } : { ...DEF }; } catch { return { ...DEF }; } }
@@ -616,6 +857,16 @@
                     <span style="font-size:14px;color:#555">自动点击订阅</span>
                     <span title="开启后脚本发现可购买的套餐会自动点击订阅按钮。&#10;关闭后只报警提醒，需手动点击（适合想自己掌控点击时机的场景）。" style="margin-left:6px;cursor:help;color:#999;font-size:14px;border:1px solid #ccc;border-radius:50%;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;line-height:1">?</span>
                 </label>
+                <label style="display:flex;align-items:center;cursor:pointer">
+                    <input type="checkbox" id="glm-acc" ${CFG.AUTO_CAPTCHA_CLICK ? 'checked' : ''} style="margin-right:8px">
+                    <span style="font-size:14px;color:#555">自动点击验证码文字</span>
+                    <span title="开启后会把本地识别出的验证码文字坐标自动点到图上。关闭后只识别和记录，不自动点图。" style="margin-left:6px;cursor:help;color:#999;font-size:14px;border:1px solid #ccc;border-radius:50%;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;line-height:1">?</span>
+                </label>
+                <label style="display:flex;align-items:center;cursor:pointer">
+                    <input type="checkbox" id="glm-acf" ${CFG.AUTO_CAPTCHA_CONFIRM ? 'checked' : ''} style="margin-right:8px">
+                    <span style="font-size:14px;color:#555">自动点击验证码确定</span>
+                    <span title="默认关闭。开启后点完验证码文字会自动点确定；关闭后需要你手动点确定。" style="margin-left:6px;cursor:help;color:#999;font-size:14px;border:1px solid #ccc;border-radius:50%;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;line-height:1">?</span>
+                </label>
             </div>
             <div style="display:flex;justify-content:space-between;gap:10px">
                 <button id="glm-multi" style="padding:8px 16px;border:1px solid #52c41a;background:#f6ffed;color:#52c41a;border-radius:6px;cursor:pointer;font-weight:600">🚀 一键多开</button>
@@ -640,6 +891,8 @@
                 CHECK_INTERVAL    : CFG.CHECK_INTERVAL,
                 AUTO_CLOSE_INVALID: panel.querySelector('#glm-aci').checked,
                 AUTO_CLICK_SUB    : panel.querySelector('#glm-acs').checked,
+                AUTO_CAPTCHA_CLICK: panel.querySelector('#glm-acc').checked,
+                AUTO_CAPTCHA_CONFIRM: panel.querySelector('#glm-acf').checked,
                 SAFE_DEFAULTS_VERSION,
             });
             ov.remove(); alert('已保存，即将刷新。'); location.reload();
@@ -938,6 +1191,14 @@
         pollInterval: 50,
         pollTimeout: 20000,
     };
+    const CAPTCHA_CFG = (() => {
+        try {
+            const raw = GM_getValue('glm_coding_config_v5', '{}');
+            return { AUTO_CAPTCHA_CLICK: true, AUTO_CAPTCHA_CONFIRM: false, ...JSON.parse(raw || '{}') };
+        } catch {
+            return { AUTO_CAPTCHA_CLICK: true, AUTO_CAPTCHA_CONFIRM: false };
+        }
+    })();
 
     function getWindowIndex() {
         const params = new URLSearchParams(location.search);
@@ -1163,7 +1424,7 @@
 
     function extractCaptchaChars(text) {
         var chars = (text || '').match(/[\u4e00-\u9fff]/g) || [];
-        return chars.slice(0, 3);
+        return chars.slice(-3);
     }
 
     function findCaptchaContainer() {
@@ -1454,6 +1715,113 @@
         return null;
     }
 
+    function captchaBgUrlFrom(el) {
+        if (!el) return '';
+        var bg = '';
+        try { bg = (el.style && el.style.backgroundImage) || window.getComputedStyle(el).backgroundImage || ''; } catch(e) {}
+        var match = bg.match(/url\(["']?([^"')]+)/);
+        if (!match) return '';
+        try { return new URL(match[1], location.href).href; } catch(e) { return match[1]; }
+    }
+
+    function findCaptchaBgElementDirect() {
+        var selectors = [
+            '#slideBg',
+            '.tencent-captcha-dy__verify-bg-img',
+            '.tencent-captcha-dy__bg-img',
+            '[class*="verify-bg"]',
+            '[class*="bg-img"]',
+            '.tencent-captcha-dy__image-area'
+        ];
+        for (var i = 0; i < selectors.length; i++) {
+            var els = document.querySelectorAll(selectors[i]);
+            for (var j = 0; j < els.length; j++) {
+                var el = els[j];
+                if (visible(el) && captchaBgUrlFrom(el)) return el;
+            }
+        }
+        return null;
+    }
+
+    function fetchCaptchaImageDirect(url) {
+        return new Promise(function(resolve, reject) {
+            if (typeof GM_xmlhttpRequest !== 'undefined') {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: url,
+                    responseType: 'blob',
+                    onload: function(r) {
+                        var reader = new FileReader();
+                        reader.onload = function() { resolve(reader.result); };
+                        reader.onerror = function() { reject(new Error('FileReader failed')); };
+                        reader.readAsDataURL(r.response);
+                    },
+                    onerror: function() { reject(new Error('image download failed')); }
+                });
+                return;
+            }
+            fetch(url).then(function(r) { return r.blob(); }).then(function(blob) {
+                var reader = new FileReader();
+                reader.onload = function() { resolve(reader.result); };
+                reader.onerror = function() { reject(new Error('FileReader failed')); };
+                reader.readAsDataURL(blob);
+            }).catch(reject);
+        });
+    }
+
+    async function handleCaptchaDirectInPage(chars) {
+        if (!CAPTCHA_CFG.AUTO_CAPTCHA_CLICK) {
+            console.log('[captcha-direct-page] auto captcha click disabled');
+            return;
+        }
+        if (rushState === 'solving') return;
+        rushState = 'solving';
+        var payloadText = chars.join('');
+        try {
+            var bgEl = findCaptchaBgElementDirect();
+            if (!bgEl) throw new Error('no captcha background element');
+            var bgUrl = captchaBgUrlFrom(bgEl);
+            if (!bgUrl) throw new Error('no captcha background url');
+            console.log('[captcha-direct-page] bg:', bgUrl.substring(0, 120));
+            var image = await fetchCaptchaImageDirect(bgUrl);
+            var resp = await serverRequest('POST', '/captcha_direct', {
+                image: image,
+                text: payloadText,
+                remark: payloadText,
+                ts: Date.now(),
+                source: 'glm-coding-helper-page-direct'
+            });
+            var result = resp && resp.result;
+            if (!result || !result.success || !Array.isArray(result.click_coords)) {
+                throw new Error('bad direct result: ' + JSON.stringify(resp).substring(0, 180));
+            }
+            var rect = bgEl.getBoundingClientRect();
+            console.log('[captcha-direct-page] click result:', JSON.stringify(result).substring(0, 260));
+            for (var i = 0; i < result.click_coords.length; i++) {
+                var c = result.click_coords[i];
+                var nx = Number(c.nx);
+                var ny = Number(c.ny);
+                if (!Number.isFinite(nx) && Number.isFinite(Number(c.rel_x))) nx = Number(c.rel_x) / rect.width;
+                if (!Number.isFinite(ny) && Number.isFinite(Number(c.rel_y))) ny = Number(c.rel_y) / rect.height;
+                if (!Number.isFinite(nx) || !Number.isFinite(ny)) continue;
+                dispatchClickAt(bgEl, nx * rect.width, ny * rect.height, c.char || String(i + 1));
+                await new Promise(function(r) { setTimeout(r, 220); });
+            }
+            await new Promise(function(r) { setTimeout(r, 350); });
+            if (CAPTCHA_CFG.AUTO_CAPTCHA_CONFIRM) {
+                findAndClickConfirm();
+            } else {
+                console.log('[captcha-direct-page] captcha confirm is disabled; waiting for manual confirm');
+            }
+        } catch (e) {
+            console.error('[captcha-direct-page] error:', e);
+            captchaSent = false;
+            lastCaptchaText = '';
+        } finally {
+            rushState = 'idle';
+        }
+    }
+
     async function checkCaptchaPrompt() {
         if (rushState === 'solving') return;
 
@@ -1473,6 +1841,9 @@
 
         if (!captchaSent) {
             captchaSent = true;
+            console.log('[captcha] page direct solver:', payloadText);
+            handleCaptchaDirectInPage(found.chars).catch(function(e) { console.error('[captcha-direct-page] unhandled:', e); });
+            return;
             if (RUSH_CONFIG.enabled) {
                 handleCaptchaRush(found.chars).catch(function(e) { console.error('[captcha-rush] unhandled:', e); });
             } else {

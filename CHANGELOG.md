@@ -1,9 +1,8 @@
-# Changelog
+# 修复历史
 
 ## 2026-05-27
 
-- Fixed captcha modal detection when the Tencent captcha appears far to the left
-  in wide browser windows. The backend now accepts left-side modal candidates
-  while keeping the existing width and frequency filters.
-- Verified the fix with a 1942x1042 Chrome capture where the captcha image was
-  detected and recognized successfully.
+- 修复宽屏窗口下腾讯验证码弹窗偏左时，后端找不到弹窗并提示
+  `no modal after ... attempts` 的问题。
+- 后端现在接受更靠左的弹窗候选，同时保留原有的宽度和频次过滤，避免误裁。
+- 已用 1942x1042 的 Chrome 截图验证：偏左验证码可以被正确裁剪并识别。

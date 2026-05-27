@@ -29,6 +29,12 @@ https://github.com/user-attachments/assets/e1a56d07-5c4d-4aa1-a567-909dd25bd037
 docs/backend_config.md
 ```
 
+修复历史见：
+
+```text
+CHANGELOG.md
+```
+
 
 
 ## 快速开始

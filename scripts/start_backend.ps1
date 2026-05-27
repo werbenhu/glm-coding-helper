@@ -32,6 +32,29 @@ function Find-AncestorVenvPython {
     return ""
 }
 
+function Test-BackendMainPython {
+    param([string]$PythonPath)
+    if (-not $PythonPath) { return $false }
+    if ($PythonPath -ne "python" -and -not (Test-Path $PythonPath)) { return $false }
+    $OutFile = [System.IO.Path]::GetTempFileName()
+    $ErrFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $Proc = Start-Process -FilePath $PythonPath `
+            -ArgumentList @("-c", "import ultralytics") `
+            -NoNewWindow `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput $OutFile `
+            -RedirectStandardError $ErrFile
+        return $Proc.ExitCode -eq 0
+    } catch {
+        return $false
+    } finally {
+        Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $ErrFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
 if (-not $env:CNCAPTCHA_CPU_OCR_PYTHON) {
     $CpuPython = Find-AncestorVenvPython -StartDir $Root -VenvName ".venv_paddle"
     if ($CpuPython) { $env:CNCAPTCHA_CPU_OCR_PYTHON = $CpuPython }
@@ -39,6 +62,15 @@ if (-not $env:CNCAPTCHA_CPU_OCR_PYTHON) {
 if (-not $env:CNCAPTCHA_GPU_OCR_PYTHON) {
     $GpuPython = Find-AncestorVenvPython -StartDir $Root -VenvName ".venv_paddle_gpu"
     if ($GpuPython) { $env:CNCAPTCHA_GPU_OCR_PYTHON = $GpuPython }
+}
+
+$MainPython = ""
+if ((Test-BackendMainPython $env:CNCAPTCHA_CPU_OCR_PYTHON)) {
+    $MainPython = $env:CNCAPTCHA_CPU_OCR_PYTHON
+} elseif ((Test-BackendMainPython $env:CNCAPTCHA_GPU_OCR_PYTHON)) {
+    $MainPython = $env:CNCAPTCHA_GPU_OCR_PYTHON
+} else {
+    $MainPython = "python"
 }
 
 $argsList = @("scripts\tools\start_backend.py", "--mode", $Mode, "--port", "$Port")
@@ -52,4 +84,4 @@ if ($YoloDevice) {
     $argsList += $YoloDevice
 }
 
-python @argsList
+& $MainPython @argsList

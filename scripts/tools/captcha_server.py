@@ -439,23 +439,15 @@ class CaptchaHandler(BaseHTTPRequestHandler):
                 text = str(data.get("text", "")).strip()
                 request_ts = int(data.get("ts", time.time() * 1000))
                 chars = re.findall(r"[\u4e00-\u9fff]", text or "")
-                chars_text = "".join(chars[:3])
-                browser_hint = data.get("browser") if isinstance(data.get("browser"), dict) else {}
-
-                if chars_text:
-                    threading.Thread(
-                        target=trigger_auto_capture,
-                        args=(chars_text, request_ts, browser_hint),
-                        daemon=True,
-                    ).start()
-
-                self.send_json(200, {"status": "processing", "chars": chars_text, "ts": request_ts})
+                chars_text = "".join(chars[-3:])
+                log_to_gui(f"[legacy] ignored /captcha request: {chars_text}; use /captcha_direct")
+                self.send_json(200, {"status": "ignored", "chars": chars_text, "ts": request_ts})
 
             elif path == "/captcha_direct":
                 text = str(data.get("text", "")).strip()
                 img_b64 = data.get("image", "")
                 chars = re.findall(r"[\u4e00-\u9fff]", text or "")
-                chars_text = "".join(chars[:3])
+                chars_text = "".join(chars[-3:])
 
                 if not chars_text or not img_b64:
                     self.send_json(400, {"error": "missing text or image", "success": False})
@@ -573,35 +565,7 @@ def run_gui():
     lbl_save = ttk.Label(main_frame, text="无", wraplength=320)
     lbl_save.grid(row=row, column=1, sticky=tk.W, pady=2); row += 1
 
-    ttk.Label(main_frame, text="Browser window:").grid(row=row, column=0, sticky=tk.W, pady=2)
-    browser_var = tk.StringVar(value="Auto")
-    browser_combo = ttk.Combobox(main_frame, textvariable=browser_var, width=34, state="readonly")
-    browser_combo.grid(row=row, column=1, sticky=tk.W, pady=2)
-    refresh_button = ttk.Button(main_frame, text="Refresh")
-    refresh_button.grid(row=row, column=2, sticky=tk.W, padx=(8, 0))
-    row += 1
-
-    def refresh_browser_windows():
-        if not find_windows:
-            values = ["Auto"]
-        else:
-            titles = [w.get("title", "") for w in find_windows(BROWSER_WINDOW_KEYWORDS)]
-            values = ["Auto"] + [title for title in titles if title]
-        browser_combo["values"] = values
-        if browser_var.get() not in values:
-            browser_var.set("Auto")
-        state.selected_browser_title = "" if browser_var.get() == "Auto" else browser_var.get()
-
-    def on_browser_selected(_event=None):
-        selected = browser_var.get()
-        state.selected_browser_title = "" if selected == "Auto" else selected
-        log_to_gui(f"Browser window: {selected}")
-
-    browser_combo.bind("<<ComboboxSelected>>", on_browser_selected)
-    refresh_button.configure(command=refresh_browser_windows)
-    refresh_browser_windows()
-
-    log_box = tk.Text(main_frame, height=11, width=58, font=("Consolas", 9), bg="#ffffff", relief=tk.FLAT)
+    log_box = tk.Text(main_frame, height=13, width=70, font=("Consolas", 9), bg="#ffffff", relief=tk.FLAT)
     log_box.grid(row=row, column=0, columnspan=3, pady=8); row += 1
 
     def update_gui():

@@ -23,6 +23,7 @@ __pycache__/
 # Runtime output
 logs/
 dataset/
+dist/
 processed/
 runs/
 *.log
@@ -39,3 +40,5 @@ Thumbs.db
 *.env
 secrets.*
 config.local.*
+*token*.txt
+新建文本文档*.txt
