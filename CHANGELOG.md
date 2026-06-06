@@ -1,5 +1,13 @@
 # 修复历史
 
+## 2026-06-06
+
+- 修复 Win11 用户启动后端时报 `ModuleNotFoundError: No module named 'PIL'` 的问题。
+- `start-backend.cmd` 现在会先走一键启动环境检查，不再绕过依赖修复流程直接启动后端。
+- 当 `.venv_paddle` / `.venv_paddle_gpu` 已存在但核心库导入失败时，会自动重建对应环境，覆盖旧 portable 包虚拟环境不完整或不可迁移的情况。
+- 后端启动前的主 Python 检查从只检查 `ultralytics` 扩展到 `ultralytics, PIL, cv2, numpy`，避免选中半损坏环境。
+- 发布 `v2026.06.06-1749`，重新打包 online installer 和 portable CPU 包，并在 GitHub issue #7 回复新版本链接。
+
 ## 2026-05-29
 
 - 发布用户脚本 v8.13，增强售罄状态判断的稳定性。
