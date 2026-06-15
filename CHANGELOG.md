@@ -21,6 +21,7 @@
   - `start-backend-pipeline.ps1` venv 自动检测（`venv/` 或 `.venv_paddle/`）+ 依赖检查（fastapi/uvicorn/psutil）+ 缺失时自动 pip install
   - 端口占用**中文提示**（含 PID/进程名/命令行），杀进程前需用户确认
   - 启动命令：双击 `start-backend-pipeline.cmd` 或 `pwsh start-backend-pipeline.ps1`
+- 修复 `start-backend-pipeline.ps1` 在 Windows PowerShell 5.1 中文系统下的 ParserError（缺少 UTF-8 BOM），加 EF BB BF 前缀即可
 
 ## 2026-06-06
 
