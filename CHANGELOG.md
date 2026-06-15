@@ -4,6 +4,11 @@
 
 - 发布用户脚本 v8.19：黄金时间从 9:30-10:10 延长到 9:30-11:00，覆盖中午还在补货的窗口（用户反馈 10:30 之后仍有成功下单）。
 - 黄金时间内的 `MAX_RL` 无上限重试逻辑同步覆盖 9:30-11:00 全段。
+- 发布用户脚本 v8.20：合并 PR #17（danny0119 提交）
+  - 新增**抢购模式**（`RUSH_ENABLED` + HH:MM:SS 定点卡点确认），默认关闭，不影响现有用户
+  - 修复 `tabEl` 1-index → 0-index BUG（原来 `tabEl(1)` 拿到第二个 tab）
+  - 修复 `findAndClickConfirm` 误点支付按钮（移除 `.pay-dialog button.el-button--primary` 等选择器）
+  - 削弱"绝对安全锁"：`everSucceeded && PS.bizId` 替代纯 `everSucceeded`，允许 stale 成功后清理
 
 ## 2026-06-06
 
