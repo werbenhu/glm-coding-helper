@@ -200,20 +200,28 @@ https://www.bigmodel.cn/glm-coding
 - 每个 worker 绑定独立物理核心，消除 GIL 争抢
 - 队列传递裁剪结果，零序列化开销
 
-启动：
+启动（任选其一）：
 ```powershell
+# 方式 1：双击 start-backend-pipeline.cmd（推荐 Windows 用户）
+# 方式 2：命令行
+pwsh start-backend-pipeline.ps1
+# 方式 3：手动
 python backend/server.py
 ```
+
+双击启动器会自动检测 venv（`venv/` 或 `.venv_paddle/`）、检查依赖（fastapi/uvicorn/psutil）、缺失时自动 pip install；端口被占用时会显示中文提示（含 PID/进程名/命令行），杀进程前需用户确认。
 
 ## 常用文件
 
 | 文件 | 用途 |
 | --- | --- |
 | `glm-coding-helper.user.js` | 给 Tampermonkey 安装的主脚本 |
-| `start-backend.cmd` | 启动已有本地后端环境 |
+| `start-backend.cmd` | 启动已有本地后端环境（旧版单进程） |
+| `start-backend-pipeline.cmd` | 双击启动 pipeline 后端（v8.20+ 推荐） |
 | `one-click-start.cmd` | 自动安装环境并启动 |
 | `install-env.cmd` | 手动安装 CPU 后端环境 |
 | `scripts/` | 后端和打包脚本 |
+| `backend/` | Pipeline 后端（FastAPI + 多进程 YOLO→OCR） |
 | `models/` | 本地识别模型 |
 
 ## 常用启动方式
