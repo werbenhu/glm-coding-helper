@@ -62,6 +62,37 @@ function Test-PythonImports {
     }
 }
 
+function Test-ForeignVenv {
+    param(
+        [string]$VenvDir
+    )
+    if (-not $VenvDir -or -not (Test-Path $VenvDir)) { return $false }
+    $cfg = Join-Path $VenvDir "pyvenv.cfg"
+    if (-not (Test-Path $cfg)) { return $true }
+    try {
+        $text = Get-Content -LiteralPath $cfg -Raw -Encoding UTF8
+    } catch {
+        return $true
+    }
+    foreach ($line in ($text -split "`r?`n")) {
+        if ($line -match '^(executable|command)\s*=\s*(.+)$') {
+            $value = $Matches[2].Trim()
+            if ($value -match 'C:\\Users\\17336\\') { return $true }
+            if ($line -match '^executable\s*=' -and -not (Test-Path $value)) { return $true }
+        }
+        if ($line -match '^command\s*=.*\s-m\s+venv\s+(.+)$') {
+            $createdAt = $Matches[1].Trim().Trim('"')
+            try {
+                $expected = (Resolve-Path -LiteralPath $VenvDir -ErrorAction Stop).Path
+                if ([IO.Path]::GetFullPath($createdAt).TrimEnd('\') -ne $expected.TrimEnd('\')) { return $true }
+            } catch {
+                return $true
+            }
+        }
+    }
+    return $false
+}
+
 function Has-NvidiaGpu {
     $nvidia = Get-Command nvidia-smi -ErrorAction SilentlyContinue
     if (-not $nvidia) { return $false }
@@ -72,11 +103,12 @@ function Has-NvidiaGpu {
 function Invoke-Bootstrap {
     param(
         [string]$BootstrapTarget,
-        [string]$PythonPath
+        [string]$PythonPath,
+        [switch]$ForceRecreate
     )
     $argsList = @("-Target", $BootstrapTarget)
-    if ($PythonPath -and (Test-Path $PythonPath)) {
-        Write-Host "Existing backend environment failed import checks. Recreating it..."
+    if ($ForceRecreate -or ($PythonPath -and (Test-Path $PythonPath))) {
+        Write-Host "Existing backend environment failed portability/import checks. Recreating it..."
         $argsList += "-Recreate"
     }
     foreach ($arg in $PipArg) {
@@ -97,14 +129,21 @@ if ($InstallTarget -eq "auto") {
 
 $CpuPython = Join-Path $Root ".venv_paddle\Scripts\python.exe"
 $GpuPython = Join-Path $Root ".venv_paddle_gpu\Scripts\python.exe"
+$CpuVenv = Join-Path $Root ".venv_paddle"
+$GpuVenv = Join-Path $Root ".venv_paddle_gpu"
 $ImportCode = "import ultralytics, paddleocr, paddlex, cv2, PIL, numpy"
 
 $SelectedPython = if ($InstallTarget -eq "gpu") { $GpuPython } else { $CpuPython }
-$Ready = Test-PythonImports $SelectedPython $ImportCode
+$SelectedVenv = if ($InstallTarget -eq "gpu") { $GpuVenv } else { $CpuVenv }
+$NeedsRecreate = Test-ForeignVenv $SelectedVenv
+if ($NeedsRecreate) {
+    Write-Host "[WARN] Existing backend environment was created on another machine or in another folder. It will be rebuilt locally." -ForegroundColor Yellow
+}
+$Ready = (-not $NeedsRecreate) -and (Test-PythonImports $SelectedPython $ImportCode)
 
 if (-not $Ready) {
     Write-Host "Backend environment is missing or incomplete (PIL/cv2/numpy etc). Installing $InstallTarget environment..."
-    $bootstrapExit = Invoke-Bootstrap -BootstrapTarget $InstallTarget -PythonPath $SelectedPython
+    $bootstrapExit = Invoke-Bootstrap -BootstrapTarget $InstallTarget -PythonPath $SelectedPython -ForceRecreate:$NeedsRecreate
     $SelectedPython = if ($InstallTarget -eq "gpu") { $GpuPython } else { $CpuPython }
     $Ready = Test-PythonImports $SelectedPython $ImportCode
 

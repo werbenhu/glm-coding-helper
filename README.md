@@ -56,10 +56,10 @@ https://github.com/OLmatter/glm-coding-helper/releases
 
 | 文件 | 适合谁 | 说明 |
 | --- | --- | --- |
-| `glm-coding-helper-portable-cpu-*.zip` | 想解压即用的人 | 自带 CPU 后端环境，体积较大，解压后直接双击启动 |
+| `glm-coding-helper-portable-cpu-*.zip` | 想少下载模型缓存的人 | 自带本地模型/缓存文件，但首次仍会在用户电脑上创建 CPU 后端环境 |
 | `glm-coding-helper-online-installer-*.zip` | 网络正常、想下载小包的人 | 小包，首次启动会自动下载并安装 CPU/GPU 环境 |
 
-不知道选哪个，就下载 `portable-cpu`。
+不知道选哪个，就下载 `portable-cpu`，首次运行双击 `one-click-start.cmd`。
 
 ### 2. 解压
 
@@ -111,7 +111,7 @@ Greasy Fork 和仓库根目录的 `glm-coding-helper.user.js` 都是给普通用
 start-backend-pipeline-gui.cmd
 ```
 
-首次使用如果环境没装好，会弹 PowerShell 提示，按提示输入 `1` 让它自动 `pip install`，或者先双击 `one-click-start.cmd` 装好环境再启动。
+首次使用如果环境没装好，先双击 `one-click-start.cmd` 在本机创建/修复环境；之后再用 `start-backend-pipeline-gui.cmd` 日常启动。
 
 后端启动后默认监听：
 
@@ -211,7 +211,7 @@ pwsh start-backend-pipeline-gui.ps1
 python backend/server.py
 ```
 
-双击启动器会自动检测 venv（`venv/` 或 `.venv_paddle/`）、检查依赖（fastapi/uvicorn/psutil）、缺失时自动 pip install；端口被占用时会显示中文提示（含 PID/进程名/命令行），杀进程前需用户确认。
+双击启动器会自动检测 venv（`venv/` 或 `.venv_paddle/`）、检查依赖（fastapi/uvicorn/psutil）、缺失时自动 pip install；如果发现旧包复制出来的外来 venv，会提示先运行 `one-click-start.cmd` 在本机重建。端口被占用时会显示中文提示（含 PID/进程名/命令行），杀进程前需用户确认。
 
 ### 可视化 GUI 启动器
 
@@ -306,7 +306,7 @@ docs/captcha_model_journey.md
 
 ### 后端窗口红字报错怎么办？
 
-优先确认你下载的是最新版 Release 包。如果是在线安装包，第一次启动需要联网下载环境；如果网络不稳定，建议换 `portable-cpu` 自带环境包。
+优先确认你下载的是最新版 Release 包。如果是在线安装包，第一次启动需要联网下载环境；`portable-cpu` 会减少模型/缓存下载，但仍必须在用户自己的电脑上创建 Python venv。Windows venv 不能直接从打包机复制，否则可能指向打包机的 Python 路径。
 
 ### 优惠活动从哪里进入？
 
