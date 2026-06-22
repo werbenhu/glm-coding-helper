@@ -112,9 +112,11 @@ function Invoke-Bootstrap {
         Write-Host "Existing backend environment failed portability/import checks. Recreating it..."
         $argsList += "-Recreate"
     }
-    foreach ($arg in $PipArg) {
+    # 用分号把所有 pip 参数拼成单个字符串传递，避免 "-i" 等 dash 开头的值
+    # 被 PowerShell 当成下一个参数名（"Missing an argument for parameter 'PipArg'"）
+    if ($PipArg -and $PipArg.Count) {
         $argsList += "-PipArg"
-        $argsList += $arg
+        $argsList += ($PipArg -join ";")
     }
     # 把 bootstrap 完整输出同时写日志文件，便于失败时诊断
     $logPath = Join-Path $Root "logs\backend-install.log"
