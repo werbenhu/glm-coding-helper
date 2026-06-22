@@ -486,13 +486,18 @@ class CaptchaHandler(BaseHTTPRequestHandler):
                     image.save(debug_path)
                     log_to_gui(f"[direct] 调试保存: {debug_path.name} ({len(img_bytes)//1024}KB)")
 
+                    _t0 = time.perf_counter()
                     result = recognize_captcha(str(debug_path), list(chars_text), crop_rect=None)
+                    _e2e_ms = (time.perf_counter() - _t0) * 1000
 
                     if result.get("success"):
-                        log_to_gui(f"[direct] 识别成功: {result['pred_text']} conf={result['confidence']}")
+                        log_to_gui(f"[captcha] {chars_text} -> {result['pred_text']} | "
+                                   f"conf={result.get('confidence',0):.2f} end-to-end={_e2e_ms:.0f}ms "
+                                   f"(yolo={result.get('yolo_ms','?')}ms ocr={result.get('ocr_ms','?')}ms) | "
+                                   f"engine={result.get('engine','?')}")
                         state.status = f"识别完成: {result['pred_text']} ({result['confidence']})"
                     else:
-                        log_to_gui(f"[direct] 识别失败: {result.get('error', '?')}")
+                        log_to_gui(f"[captcha] FAIL: {result.get('error', '?')} ({_e2e_ms:.0f}ms)")
                         state.status = f"识别失败: {result.get('error', '?')}"
 
                     self.send_json(200, {"success": True, "result": result})
